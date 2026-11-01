@@ -168,6 +168,14 @@ def _post(msg_id: int, minutes_ago: float, text: str) -> Post:
     return Post(msg_id, (NOW - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ"), text)
 
 
+def _es_date(dt: datetime) -> str:
+    """Today as a report states it, so seeded reports stay inside volcano_status's 30-day window."""
+    local = dt - timedelta(hours=5)
+    months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+              "noviembre", "diciembre"]
+    return f"{local.day:02d} de {months[local.month - 1]} de {local.year}"
+
+
 def _quake_text(status, evento, minutes_ago, mag, place, lat="3.127° S"):
     local = (NOW - timedelta(minutes=minutes_ago) - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S")
     return (f"[{status}]\nEvento: {evento}\nOcurrido: {local}\nMag.: {mag}\nProf.: 10.0 km\nLat.: {lat}\n"
@@ -182,7 +190,7 @@ def server(tmp_path):
         _post(101, 12, _quake_text("PRELIMINAR", "ev1", 15, "3.8M", "a 25.91 km de Cuenca, Azuay")),
         _post(102, 6, _quake_text("REVISADO", "ev1", 15, "3.3MLv", "a 16.22 km de Cuenca, Azuay")),
         _post(103, 3, _quake_text("PRELIMINAR", "ev2", 4, "2.9M", "a 10 km de Quito, Pichincha", "0.2° S")),
-        _post(104, 60, "Informe Diario #Sangay N° 2026-254\nlunes 28 de septiembre de 2026\nNivel de Actividad:\n"
+        _post(104, 60, f"Informe Diario #Sangay N° 2026-254\n{_es_date(NOW)}\nNivel de Actividad:\n"
                        "Superficial: Moderada\nTendencia Superficial: Ascendente\nInterna: Baja\n"
                        "Tendencia Interna: Sin cambio\nRevisarlo en: https://example/sangay"),
         _post(105, 90, "#IGAlInstante Informativo VOLCÁN SANGAY No. 2026-007\nDesde las 07:08 TL, emisión de "
