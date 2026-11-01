@@ -1,4 +1,4 @@
-# One image, two roles (homelab compose):
+# One image, two roles:
 #   server: igepn-mcp serve --transport http --host 0.0.0.0   (IGEPN_MCP_TOKEN set; IGEPN_POLL_MINUTES=3 polls in-process)
 #   poll:   igepn-mcp poll                                    (alternative: a host timer every 3 min, same /data volume)
 FROM python:3.12-slim

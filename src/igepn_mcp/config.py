@@ -18,7 +18,7 @@ class Settings:
     fetch_timeout: float = field(default_factory=lambda: float(os.environ.get("IGEPN_FETCH_TIMEOUT", "20")))
     # Catch-up cap: how many preview pages (20 posts each) one poll may walk back to reach the watermark.
     max_catchup_pages: int = field(default_factory=lambda: int(os.environ.get("IGEPN_MAX_CATCHUP_PAGES", "25")))
-    # >0 makes `serve` poll in the background (no timer needed; the homelab default is 3).
+    # >0 makes `serve` poll in the background (no timer needed; 3 is the intended cadence).
     poll_minutes: float = field(default_factory=lambda: float(os.environ.get("IGEPN_POLL_MINUTES", "0")))
-    # Bearer token required on streamable-http when set (mcpo sends it as a header).
+    # Bearer token required on streamable-http when set (an MCP proxy sends it as a header).
     http_token: str | None = field(default_factory=lambda: os.environ.get("IGEPN_MCP_TOKEN") or None)
