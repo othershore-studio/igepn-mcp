@@ -213,17 +213,24 @@ def call(server, name, args):
 def test_last_quake(server):
     out = call(server, "last_quake", {})
     q = out["quake"]
-    assert out["source"] == "IGEPN" and "warning" not in out["data"]
-    assert (q["evento"], q["status"], q["mag"], q["lat"]) == ("ev2", "PRELIMINAR", 2.9, -0.2)
+    assert out["status"] == "ok" and out["source"] == "IGEPN" and "warning" not in out["data"]
+    assert (q["evento"], q["report_status"], q["mag"], q["lat"]) == ("ev2", "PRELIMINAR", 2.9, -0.2)
     assert q["ago"] == "4 min" and q["post_url"] == "https://t.me/SismosVolcanesIGEPN/103"
 
 
 def test_latest_quakes_current_view_and_filters(server):
     out = call(server, "latest_quakes", {})
     assert [q["evento"] for q in out["quakes"]] == ["ev2", "ev1"]  # one row per event; old1 outside 24 h
-    assert out["quakes"][1]["status"] == "REVISADO" and out["quakes"][1]["mag"] == 3.3  # revision wins
+    assert out["quakes"][1]["report_status"] == "REVISADO" and out["quakes"][1]["mag"] == 3.3  # revision wins
     assert call(server, "latest_quakes", {"min_mag": 3})["count"] == 1
     assert call(server, "latest_quakes", {"hours": 48, "place": "MANABI"})["quakes"][0]["evento"] == "old1"
+    assert call(server, "latest_quakes", {"place": "%"})["count"] == 0  # LIKE wildcards are literal text
+
+
+def test_latest_quakes_echoes_resolved_parameters(server):
+    out = call(server, "latest_quakes", {"hours": 12, "min_mag": 2.5, "place": "Quito", "n": 999})
+    assert (out["hours"], out["min_mag"], out["place"], out["n"]) == (12, 2.5, "Quito", 50)  # n capped, and says so
+    assert call(server, "ig_alerts", {"n": 999})["n"] == 50
 
 
 def test_last_quake_shows_preliminary_when_revised(server, tmp_path):
@@ -232,7 +239,7 @@ def test_last_quake_shows_preliminary_when_revised(server, tmp_path):
     conn.commit()
     conn.close()
     q = call(server, "last_quake", {})["quake"]
-    assert q["evento"] == "ev1" and q["status"] == "REVISADO"
+    assert q["evento"] == "ev1" and q["report_status"] == "REVISADO"
     assert q["preliminary"]["mag"] == 3.8 and q["preliminary"]["place"] == "a 25.91 km de Cuenca, Azuay"
 
 
@@ -240,19 +247,85 @@ def test_volcano_status_and_alerts(server):
     all_ = call(server, "volcano_status", {})["volcanoes"]
     assert [v["volcano"] for v in all_] == ["Sangay"]
     one = call(server, "volcano_status", {"volcano": "SANGAY "})
-    assert one["status"]["superficial"] == {"level": "Moderada", "trend": "Ascendente"}
+    assert one["status"] == "ok" and one["report"]["superficial"] == {"level": "Moderada", "trend": "Ascendente"}
     assert one["alerts_last_7_days"][0]["url"] == "https://example/alert"
-    missing = call(server, "volcano_status", {"volcano": "Cotopaxi"})
-    assert missing["found"] is False and missing["volcanoes_with_reports"] == ["Sangay"]
     alerts = call(server, "ig_alerts", {"volcano": "sangay"})
     assert alerts["count"] == 1 and alerts["alerts"][0]["volcano"] == "Sangay"
     assert call(server, "ig_alerts", {"hours": 1})["count"] == 0
+    assert call(server, "ig_alerts", {"hours": 1})["status"] == "ok"  # known quiet: a real "nothing reported"
 
 
-def test_stale_data_warning(tmp_path):
-    settings = Settings(db_path=tmp_path / "empty.db")
-    out = call(build_server(settings), "last_quake", {})
-    assert out["found"] is False and "warning" in out["data"]
+@pytest.mark.parametrize("tool", ["volcano_status", "ig_alerts"])
+def test_unknown_volcano_is_refused_not_an_empty_answer(server, tool):
+    out = call(server, tool, {"volcano": "Sangai"})  # a typo must not read as "no alerts"
+    assert out["status"] == "refused" and out["kind"] == "input" and out["advice"]
+    assert out["known_volcanoes"] == ["Sangay"]
+    assert call(server, tool, {"volcano": "!!!"})["status"] == "refused"
+    assert call(server, tool, {"volcano": "  "})["status"] == "ok"  # blank = no filter
+
+
+@pytest.mark.parametrize("tool, args", [
+    ("latest_quakes", {"hours": 0}),
+    ("latest_quakes", {"hours": -5}),
+    ("latest_quakes", {"hours": float("inf")}),
+    ("latest_quakes", {"hours": float("nan")}),
+    ("latest_quakes", {"n": 0}),
+    ("latest_quakes", {"min_mag": float("nan")}),
+    ("ig_alerts", {"hours": -1}),
+    ("ig_alerts", {"n": -3}),
+])
+def test_bad_input_is_refused_not_raised(server, tool, args):
+    out = call(server, tool, args)
+    assert out["status"] == "refused" and out["reason"] and out["advice"]
+
+
+ALL_TOOL_CALLS = [("last_quake", {}), ("latest_quakes", {}), ("volcano_status", {}),
+                  ("volcano_status", {"volcano": "Sangay"}), ("ig_alerts", {})]
+
+
+@pytest.mark.parametrize("tool, args", ALL_TOOL_CALLS)
+def test_never_polled_store_is_an_error_not_all_quiet(tmp_path, tool, args):
+    out = call(build_server(Settings(db_path=tmp_path / "empty.db")), tool, args)
+    assert (out["status"], out["kind"]) == ("error", "no_data")
+    assert "warning" in out["data"]
+
+
+@pytest.mark.parametrize("tool, args", ALL_TOOL_CALLS)
+def test_broken_store_is_an_error_result_not_an_exception(tmp_path, tool, args):
+    path = tmp_path / "corrupt.db"
+    path.write_bytes(b"this is not a sqlite database " * 100)
+    out = call(build_server(Settings(db_path=path)), tool, args)
+    assert (out["status"], out["kind"]) == ("error", "database") and out["detail"]
+
+
+def test_last_quake_with_posts_but_no_quakes_is_no_data(tmp_path):
+    settings = Settings(db_path=tmp_path / "igepn.db")
+    conn = connect(settings.db_path)
+    store_posts(conn, [_post(1, 5, "#ComunidadIG taller")], StoreStats())
+    conn.close()
+    server = build_server(settings)
+    assert call(server, "last_quake", {})["kind"] == "no_data"
+    assert (call(server, "latest_quakes", {})["status"], call(server, "latest_quakes", {})["count"]) == ("ok", 0)
+
+
+@pytest.mark.parametrize("tool, args", [("latest_quakes", {}), ("volcano_status", {}), ("ig_alerts", {})])
+def test_stale_poller_warns_on_every_tool(tmp_path, tool, args):
+    settings = Settings(db_path=tmp_path / "igepn.db")
+    conn = connect(settings.db_path)
+    store_posts(conn, [_post(1, 5, "#ComunidadIG taller")], StoreStats())
+    set_meta(conn, "last_poll_ok_utc", "2020-01-01T00:00:00Z")
+    conn.commit()
+    conn.close()
+    out = call(build_server(settings), tool, args)
+    assert out["status"] == "ok" and "out of date" in out["data"]["warning"]
+
+
+def test_guarded_tools_keep_their_argument_schema(tmp_path):
+    tools = asyncio.run(build_server(Settings(db_path=tmp_path / "igepn.db")).list_tools())
+    props = {t.name: set(t.input_schema["properties"]) for t in tools}
+    assert props == {"last_quake": set(), "latest_quakes": {"hours", "min_mag", "place", "n"},
+                     "volcano_status": {"volcano"}, "ig_alerts": {"hours", "volcano", "n"}}
+    assert all(t.description for t in tools)
 
 
 def test_healthz_open_and_bearer_required():

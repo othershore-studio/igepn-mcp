@@ -17,9 +17,22 @@ Every tool declares a `title` and all four MCP hints explicitly. All four tools 
 so each is read-only, non-destructive, idempotent and closed-world (`openWorldHint=false`); the poller, not a
 tool, is what fetches from Telegram. A test enforces this, so a new tool without metadata fails CI.
 
-Times come in Ecuador local time (`occurred_local_ec`, UTC−5) and UTC. Quakes keep IGEPN's `status`
-(`PRELIMINAR` / `REVISADO`, older posts `CONFIRMADO`). Every item carries a `post_url` (the Telegram post, with
-its image) for the UI to show.
+Times come in Ecuador local time (`occurred_local_ec`, UTC−5) and UTC. Quakes keep IGEPN's label as
+`report_status` (`PRELIMINAR` / `REVISADO`, older posts `CONFIRMADO`). Every item carries a `post_url` (the
+Telegram post, with its image) for the UI to show.
+
+### Results
+Every result has a top-level `status`, so callers never have to interpret prose:
+
+| `status` | meaning | fields |
+|---|---|---|
+| `ok` | the data is good; `count: 0` really means nothing was reported | the data, the resolved parameters, and `data` (`last_check_utc`, plus `warning` if the last successful poll is over 20 min old) |
+| `refused` | the request needs changing: an impossible `hours` / `n`, or a volcano with nothing stored | `kind`, `reason`, `advice` (and `known_volcanoes` for an unknown name) |
+| `error` | a fault, or nothing captured yet | `kind` (`no_data`, `database`, `internal`), `detail` |
+
+A store that has never been polled is an `error`, not an empty list, so "couldn't check" can't read as "all quiet".
+Arguments of the wrong type (`hours="abc"`) are rejected by the MCP SDK before the tool runs, so those still
+surface as a protocol-level tool error.
 
 ## Run
 ```bash
