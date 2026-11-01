@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_USER_AGENT = "igepn-mcp/0.1 (+https://github.com/danmarce/igepn-mcp)"
+DEFAULT_USER_AGENT = "igepn-mcp/0.1 (+https://github.com/othershore-studio/igepn-mcp)"
 DEFAULT_CHANNEL = "SismosVolcanesIGEPN"
 
 
